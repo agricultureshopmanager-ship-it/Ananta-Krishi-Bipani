@@ -5902,7 +5902,7 @@ window.BluetoothPrinter = (function(){
 <!-- ─── BOT CONTROLLER + NEEDLE ENGINE ──────────────────────────── -->
 <script type="module">
 /* ════════════════════════════════════════════════════════════════
-   SECTION A — BOT UI CONTROLLER (unchanged)
+   SECTION A — BOT UI CONTROLLER
    ════════════════════════════════════════════════════════════════ */
 
 const wrap  = document.getElementById('kb-bot-wrapper');
@@ -6011,52 +6011,112 @@ function addMessage(who, text, isError = false) {
 function showTyping(on) { typing.style.display = on ? 'inline-flex' : 'none'; }
 
 /* ════════════════════════════════════════════════════════════════
-   SECTION B — NEEDLE ENGINE (lazy-load, non-blocking)
+   SECTION B — NEEDLE WEB WORKER
+   Runs the WASM compile and every inference on a background thread,
+   so the main UI never freezes.
    ════════════════════════════════════════════════════════════════ */
 
-let engine = null;
-let engineReady = false;
-let engineLoading = false;
-let engineLoadPromise = null;
+const WORKER_SOURCE = `
+  let engine = null;
+  let ready = false;
 
-/* Load model lazily, only when first needed. This avoids blocking page
-   load and lets the user interact with the app while it downloads. */
-async function ensureEngine() {
-  if (engineReady) return true;
-  if (engineLoadPromise) return engineLoadPromise;
-
-  engineLoadPromise = (async () => {
-    engineLoading = true;
-    addMessage('bot', 'Loading AI model (13 MB, one-time). This may take a few seconds…');
-
+  async function init(modelUrl) {
     try {
       const mod = await import('https://cdn.jsdelivr.net/npm/needle-rs@0.3.1/+esm');
       await mod.default();
 
-      const res = await fetch('https://huggingface.co/Cactus-Compute/needle2/resolve/main/needle2.cact');
+      const res = await fetch(modelUrl);
       if (!res.ok) throw new Error('Model download failed: ' + res.status);
-
       const buf = new Uint8Array(await res.arrayBuffer());
 
-      // Yield to the event loop so the UI can paint before the
-      // (possibly slow) synchronous WASM load.
-      await new Promise(r => setTimeout(r, 30));
-
       engine = mod.NeedleV2Wasm.load(buf);
-      engineReady = true;
-      engineLoading = false;
-
-      addMessage('bot', 'AI ready. Ask me anything.');
-      return true;
+      ready = true;
+      self.postMessage({ type: 'ready' });
     } catch (err) {
-      console.error('[AI] Load failed', err);
-      engineLoading = false;
-      addMessage('bot', 'AI failed to load: ' + err.message, true);
-      return false;
+      self.postMessage({ type: 'error', message: err && err.message ? err.message : String(err) });
     }
-  })();
+  }
 
-  return engineLoadPromise;
+  self.onmessage = (e) => {
+    const msg = e.data;
+
+    if (msg.type === 'init') {
+      init(msg.modelUrl);
+      return;
+    }
+
+    if (msg.type === 'run') {
+      if (!ready) {
+        self.postMessage({ id: msg.id, ok: false, message: 'Engine not ready' });
+        return;
+      }
+      try {
+        const raw = engine.run(msg.query, msg.tools);
+        const conf = engine.confidence_for(msg.query, msg.tools, raw);
+        let json = '[]';
+        try { json = engine.run_json(msg.query, msg.tools); } catch (err) { json = '[]'; }
+        self.postMessage({ id: msg.id, ok: true, raw: raw, confidence: conf, json: json });
+      } catch (err) {
+        self.postMessage({ id: msg.id, ok: false, message: err && err.message ? err.message : String(err) });
+      }
+    }
+  };
+`;
+
+const workerBlob = new Blob([WORKER_SOURCE], { type: 'application/javascript' });
+const workerUrl = URL.createObjectURL(workerBlob);
+
+let worker = null;
+let workerReady = false;
+let initPromise = null;
+let runId = 0;
+const pendingRuns = new Map();
+
+function ensureWorker() {
+  if (initPromise) return initPromise;
+
+  initPromise = new Promise((resolve, reject) => {
+    worker = new Worker(workerUrl, { type: 'module' });
+
+    worker.onmessage = (e) => {
+      const msg = e.data;
+
+      if (msg.type === 'ready') {
+        workerReady = true;
+        resolve(true);
+        return;
+      }
+      if (msg.type === 'error') {
+        reject(new Error(msg.message));
+        return;
+      }
+      if (msg.id && pendingRuns.has(msg.id)) {
+        const { resolve: res, reject: rej } = pendingRuns.get(msg.id);
+        pendingRuns.delete(msg.id);
+        if (msg.ok) res({ raw: msg.raw, confidence: msg.confidence, json: msg.json });
+        else rej(new Error(msg.message || 'Run failed'));
+      }
+    };
+
+    worker.onerror = (err) => {
+      reject(new Error('Worker error: ' + (err.message || 'unknown')));
+    };
+
+    worker.postMessage({
+      type: 'init',
+      modelUrl: 'https://huggingface.co/Cactus-Compute/needle2/resolve/main/needle2.cact'
+    });
+  });
+
+  return initPromise;
+}
+
+function runInWorker(query, tools) {
+  return new Promise((resolve, reject) => {
+    const id = ++runId;
+    pendingRuns.set(id, { resolve, reject });
+    worker.postMessage({ id, type: 'run', query, tools });
+  });
 }
 
 /* ---- Tool definitions ---- */
@@ -6233,32 +6293,49 @@ function periodLabel(p) {
 
 /* ---- Main pipeline ---- */
 async function handleUserQuery(text) {
-  const ok = await ensureEngine();
-  if (!ok) return { reply: 'AI is not available. See the message above.', state: 'kb-sad' };
+  // Ensure the worker is running. This returns a promise that only
+  // resolves once the model is fully compiled — but it does NOT block
+  // the main thread while that happens.
+  try {
+    await ensureWorker();
+  } catch (err) {
+    console.error('[AI] Worker init failed', err);
+    return { reply: 'AI failed to load: ' + err.message, state: 'kb-sad' };
+  }
 
   const tools = buildToolList();
-  let raw;
-  try { raw = engine.run(text, tools); }
-  catch (err) { console.error('[AI] run failed', err); return { reply: "I couldn't process that. Try rephrasing.", state: 'kb-sad' }; }
 
-  const p = engine.confidence_for(text, tools, raw);
-  if (p != null && p < 0.5) return { reply: "I'm not sure I understood. Try: today's sales, low stock, unpaid invoices.", state: 'kb-confused' };
+  let result;
+  try {
+    result = await runInWorker(text, tools);
+  } catch (err) {
+    console.error('[AI] run failed', err);
+    return { reply: "I couldn't process that. Try rephrasing.", state: 'kb-sad' };
+  }
+
+  // Confidence gate
+  if (result.confidence != null && result.confidence < 0.5) {
+    return { reply: "I'm not sure I understood. Try: today's sales, low stock, unpaid invoices.", state: 'kb-confused' };
+  }
 
   let call;
   try {
-    const arr = JSON.parse(engine.run_json(text, tools));
+    const arr = JSON.parse(result.json);
     if (!arr.length) return { reply: "I couldn't match that to a report or action. Try rephrasing.", state: 'kb-confused' };
     call = arr[0];
-  } catch (err) { console.error('[AI] parse failed', err); return { reply: "I couldn't parse the response. Try rephrasing.", state: 'kb-confused' }; }
+  } catch (err) {
+    console.error('[AI] parse failed', err);
+    return { reply: "I couldn't parse the response. Try rephrasing.", state: 'kb-confused' };
+  }
 
   const handler = TOOL_HANDLERS[call.name];
   if (!handler) return { reply: `I don't have a tool called "${call.name}" yet.`, state: 'kb-confused' };
 
-  let result;
-  try { result = handler(call.arguments || {}); }
+  let toolResult;
+  try { toolResult = handler(call.arguments || {}); }
   catch (err) { console.error('[AI] handler failed', err); return { reply: 'Something went wrong running that. Try again.', state: 'kb-sad' }; }
 
-  return { reply: formatResult(call.name, call.arguments, result), state: result.error ? 'kb-sad' : 'kb-happy' };
+  return { reply: formatResult(call.name, call.arguments, toolResult), state: toolResult.error ? 'kb-sad' : 'kb-happy' };
 }
 
 function formatResult(toolName, args, result) {
@@ -6297,6 +6374,10 @@ async function sendUserMessage() {
   setBotState('kb-thinking');
   showTyping(true);
 
+  if (!workerReady) {
+    addMessage('bot', 'Loading AI model (13 MB, one-time). This may take a few seconds…');
+  }
+
   try {
     const { reply, state } = await handleUserQuery(text);
     showTyping(false);
@@ -6324,8 +6405,7 @@ new MutationObserver(() => {
   }
 }).observe(panel, { attributes: true, attributeFilter: ['class'] });
 
-/* ---- Do NOT preload the model. It loads on first message. ---- */
-console.log('[UI] AI bot ready. Model loads on first query.');
+console.log('[UI] AI bot ready. Worker boots on first query.');
 </script>
 </body>
 </html>
