@@ -6011,18 +6011,17 @@ window.BluetoothPrinter = (function(){
     }
   };
      
-   // Boot check
-  setTimeout(() => {
-    if (typeof SESSION !== "undefined" && SESSION) {
-      checkSubscription();
-    }
-  }, 1500);
-
-  window.Subscription = {
-    check: checkSubscription,
-    open: openModal,
-    refresh: fetchSubscription,
-  };
+  // Boot check — fires only after login succeeds and the app renders
+  let subCheckDone = false;
+  function maybeCheckSubscription() {
+    if (subCheckDone) return;
+    if (typeof SESSION === "undefined" || !SESSION) return;
+    const content = document.getElementById("content");
+    if (!content || content.children.length === 0) return;
+    subCheckDone = true;
+    checkSubscription();
+  }
+  setInterval(maybeCheckSubscription, 500);
 })();
 </script>  
 </body>
