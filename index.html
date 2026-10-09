@@ -5865,14 +5865,16 @@ window.BluetoothPrinter = (function(){
   // ══════════════════════════════════════════════════════════════
   // CONFIG — change these two values per customer
   // ══════════════════════════════════════════════════════════════
-  const CONFIG = {
+  var CONFIG = {
     priceRupees: 5000,
     returnUrl:   window.location.origin + window.location.pathname,
   };
   // ══════════════════════════════════════════════════════════════
 
-  let subscriptionData = null;
-  let checkInFlight = false;
+  var subscriptionData = null;
+  var checkInFlight = false;
+  var lastCheckAt = 0;
+  var CACHE_MS = 20000; // re-use result for 20s to avoid hammering Supabase
 
   function priceStr() { return "₹" + Number(CONFIG.priceRupees).toLocaleString("en-IN"); }
   function fmtDate(iso) {
@@ -5885,9 +5887,10 @@ window.BluetoothPrinter = (function(){
 
   async function fetchSubscription() {
     try {
-      const { data, error } = await window.sb.from("subscriptions").select("end_date, status").order("id").limit(1).maybeSingle();
-      if (error) throw error;
-      subscriptionData = data || null;
+      // IMPORTANT: sb is a top-level const from PART 03, NOT window.sb
+      var res = await sb.from("subscriptions").select("end_date, status").order("id").limit(1).maybeSingle();
+      if (res.error) throw res.error;
+      subscriptionData = res.data || null;
     } catch (e) {
       console.warn("[SUB] fetch failed", e);
       subscriptionData = null;
@@ -5901,15 +5904,15 @@ window.BluetoothPrinter = (function(){
   }
 
   function showLock() {
-    document.getElementById("sub-lock-date").textContent = fmtDate(subscriptionData?.end_date);
+    document.getElementById("sub-lock-date").textContent = fmtDate(subscriptionData ? subscriptionData.end_date : null);
     document.getElementById("sub-lock-price").textContent = priceStr() + " / year";
     document.getElementById("sub-lock").classList.add("show");
-    const app = document.getElementById("app");
+    var app = document.getElementById("app");
     if (app) app.style.visibility = "hidden";
   }
   function hideLock() {
     document.getElementById("sub-lock").classList.remove("show");
-    const app = document.getElementById("app");
+    var app = document.getElementById("app");
     if (app) app.style.visibility = "";
   }
 
@@ -5923,40 +5926,43 @@ window.BluetoothPrinter = (function(){
 
   function injectMyShopCard() {
     if (location.hash !== "#/myshop") return;
-    const content = document.getElementById("content");
+    var content = document.getElementById("content");
     if (!content || content.querySelector(".sub-myshop-card") || !subscriptionData) return;
 
-    const active = isActive();
-    const card = document.createElement("div");
+    var active = isActive();
+    var card = document.createElement("div");
     card.className = "sub-myshop-card";
-    card.innerHTML = `
-      <div class="sub-header">
-        <div class="sub-title">Subscription</div>
-        <div class="sub-status ${active ? "active" : "expired"}">${active ? "ACTIVE" : "EXPIRED"}</div>
-      </div>
-      <div class="sub-grid">
-        <div class="sub-cell">
-          <div class="lbl">Expires on</div>
-          <div class="val">${fmtDate(subscriptionData.end_date)}</div>
-        </div>
-        <div class="sub-cell">
-          <div class="lbl">${active ? "Days remaining" : "Status"}</div>
-          <div class="val" style="color:${active ? "#15803d" : "#dc2626"}">
-            ${active ? daysLeft(subscriptionData.end_date) + " days" : "Expired"}
-          </div>
-        </div>
-      </div>
-      <button class="sub-renew">${active ? "Extend Subscription" : "Renew Now"}</button>
-    `;
+    card.innerHTML =
+      '<div class="sub-header">' +
+        '<div class="sub-title">Subscription</div>' +
+        '<div class="sub-status ' + (active ? "active" : "expired") + '">' + (active ? "ACTIVE" : "EXPIRED") + '</div>' +
+      '</div>' +
+      '<div class="sub-grid">' +
+        '<div class="sub-cell">' +
+          '<div class="lbl">Expires on</div>' +
+          '<div class="val">' + fmtDate(subscriptionData.end_date) + '</div>' +
+        '</div>' +
+        '<div class="sub-cell">' +
+          '<div class="lbl">' + (active ? "Days remaining" : "Status") + '</div>' +
+          '<div class="val" style="color:' + (active ? "#15803d" : "#dc2626") + '">' +
+            (active ? daysLeft(subscriptionData.end_date) + " days" : "Expired") +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<button class="sub-renew">' + (active ? "Extend Subscription" : "Renew Now") + '</button>';
     content.insertBefore(card, content.firstChild);
     card.querySelector(".sub-renew").onclick = openModal;
   }
+
+  // Poll only while on the My Shop page — cheap, doesn't hit network
   setInterval(injectMyShopCard, 800);
 
-  async function checkSubscription() {
-    if (checkInFlight) return;
+  async function checkSubscription(force) {
+    if (checkInFlight) return isActive();
+    if (!force && Date.now() - lastCheckAt < CACHE_MS) return isActive();
     checkInFlight = true;
     await fetchSubscription();
+    lastCheckAt = Date.now();
     checkInFlight = false;
 
     if (!subscriptionData) { showLock(); return false; }
@@ -5965,44 +5971,50 @@ window.BluetoothPrinter = (function(){
     return true;
   }
 
-  // Intercept route
- const _origRoute = window.route;
+  // ── Route interceptor ─────────────────────────────────────────
+  // Chain after any existing wrapper (PART 29 wraps route too).
+  var _prevRoute = window.route;
   window.route = async function() {
-    // Only run the subscription check when the user is logged in
+    // If not logged in, don't check — just render the login page.
     if (typeof SESSION === "undefined" || !SESSION) {
       hideLock();
-      return _origRoute.apply(this, arguments);
+      return _prevRoute.apply(this, arguments);
     }
-    const active = await checkSubscription();
+    var active = await checkSubscription(false);
     if (!active) return Promise.resolve();
-    return _origRoute.apply(this, arguments);
+    return _prevRoute.apply(this, arguments);
   };
-  try { window.removeEventListener("hashchange", _origRoute); } catch(e) {}
+  // Replace the old listener (if any) with our wrapped route.
+  try { window.removeEventListener("hashchange", _prevRoute); } catch(e) {}
   window.addEventListener("hashchange", window.route);
 
-  // Wire buttons
+  // ── Buttons ───────────────────────────────────────────────────
   document.getElementById("sub-lock-renew").onclick = openModal;
-  document.getElementById("sub-lock-refresh").onclick = async () => {
-    await fetchSubscription();
+
+  document.getElementById("sub-lock-refresh").onclick = async function() {
+    await checkSubscription(true);
     if (isActive()) { hideLock(); location.reload(); }
   };
+
   document.getElementById("sub-modal-close").onclick = closeModal;
-  document.getElementById("sub-modal-proceed").onclick = async (e) => {
-    const btn = e.currentTarget;
+
+  document.getElementById("sub-modal-proceed").onclick = async function(e) {
+    var btn = e.currentTarget;
     btn.disabled = true;
     btn.textContent = "Please wait…";
     try {
-      const { data, error } = await window.sb.functions.invoke("create-cashfree-subscription", {
+      // IMPORTANT: sb (not window.sb)
+      var res = await sb.functions.invoke("create-cashfree-subscription", {
         body: {
-                    customerName:  (typeof SETTINGS !== "undefined" && SETTINGS.owner_name) || "Customer",
+          customerName:  (typeof SETTINGS !== "undefined" && SETTINGS.owner_name) || "Customer",
           customerEmail: (typeof SETTINGS !== "undefined" && SETTINGS.email)      || "customer@example.com",
           customerPhone: (typeof SETTINGS !== "undefined" && SETTINGS.phone)      || "9999999999",
           returnUrl:     CONFIG.returnUrl,
         },
       });
-      if (error) throw error;
-      if (!data || !data.authLink) throw new Error("No auth link received");
-      window.location.href = data.authLink;
+      if (res.error) throw res.error;
+      if (!res.data || !res.data.authLink) throw new Error("No auth link received");
+      window.location.href = res.data.authLink;
     } catch (err) {
       console.error("[SUB] invoke failed", err);
       alert("Could not start payment: " + (err.message || err));
@@ -6010,19 +6022,23 @@ window.BluetoothPrinter = (function(){
       btn.textContent = "Proceed to Payment";
     }
   };
-     
-  // Boot check — fires only after login succeeds and the app renders
-  let subCheckDone = false;
-  function maybeCheckSubscription() {
-    if (subCheckDone) return;
+
+  // ── Boot check ────────────────────────────────────────────────
+  // Fire the first subscription check only once the user is logged in
+  // AND the app has rendered some content (i.e., not the login page).
+  var subCheckDone = false;
+  var bootTimer = setInterval(function() {
+    if (subCheckDone) { clearInterval(bootTimer); return; }
     if (typeof SESSION === "undefined" || !SESSION) return;
-    const content = document.getElementById("content");
+    var content = document.getElementById("content");
     if (!content || content.children.length === 0) return;
+    // Skip if we're on the login page (has .login-page class)
+    if (content.querySelector(".login-page")) return;
     subCheckDone = true;
-    checkSubscription();
-  }
-  setInterval(maybeCheckSubscription, 500);
+    clearInterval(bootTimer);
+    checkSubscription(true);
+  }, 400);
 })();
-</script>  
+</script>
 </body>
 </html>
