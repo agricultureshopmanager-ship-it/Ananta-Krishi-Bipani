@@ -5994,9 +5994,9 @@ window.BluetoothPrinter = (function(){
     try {
       const { data, error } = await window.sb.functions.invoke("create-cashfree-subscription", {
         body: {
-          customerName:  (window.SETTINGS && window.SETTINGS.owner_name) || "Customer",
-          customerEmail: (window.SETTINGS && window.SETTINGS.email)      || "customer@example.com",
-          customerPhone: (window.SETTINGS && window.SETTINGS.phone)      || "9999999999",
+                    customerName:  (typeof SETTINGS !== "undefined" && SETTINGS.owner_name) || "Customer",
+          customerEmail: (typeof SETTINGS !== "undefined" && SETTINGS.email)      || "customer@example.com",
+          customerPhone: (typeof SETTINGS !== "undefined" && SETTINGS.phone)      || "9999999999",
           returnUrl:     CONFIG.returnUrl,
         },
       });
