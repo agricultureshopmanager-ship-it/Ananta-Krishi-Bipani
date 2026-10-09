@@ -5966,8 +5966,13 @@ window.BluetoothPrinter = (function(){
   }
 
   // Intercept route
-  const _origRoute = window.route;
+ const _origRoute = window.route;
   window.route = async function() {
+    // Only run the subscription check when the user is logged in
+    if (typeof SESSION === "undefined" || !SESSION) {
+      hideLock();
+      return _origRoute.apply(this, arguments);
+    }
     const active = await checkSubscription();
     if (!active) return Promise.resolve();
     return _origRoute.apply(this, arguments);
@@ -6005,17 +6010,13 @@ window.BluetoothPrinter = (function(){
       btn.textContent = "Proceed to Payment";
     }
   };
-
-  // Boot check
+     
+   // Boot check
   setTimeout(() => {
-    if (window.SESSION) {
+    if (typeof SESSION !== "undefined" && SESSION) {
       checkSubscription();
-    } else {
-      const w = setInterval(() => {
-        if (window.SESSION) { clearInterval(w); checkSubscription(); }
-      }, 500);
     }
-  }, 1200);
+  }, 1500);
 
   window.Subscription = {
     check: checkSubscription,
