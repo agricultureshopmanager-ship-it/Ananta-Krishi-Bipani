@@ -5784,5 +5784,245 @@ window.BluetoothPrinter = (function(){
   console.log('[PDF] PART 31 ready');
 })();
 </script>
+<!-- ══════════════════════════════════════════════════════════════════
+     PART 33 — SUBSCRIPTION (Cashfree auto-renew)
+     ══════════════════════════════════════════════════════════════════ -->
+<style>
+  #sub-lock, #sub-modal { position: fixed; inset: 0; z-index: 999999; display: none; align-items: center; justify-content: center; background: rgba(15,23,42,.55); padding: 20px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #sub-lock.show, #sub-modal.show { display: flex; }
+  #sub-lock .sub-box, #sub-modal .sub-box { background: #fff; border-radius: 16px; padding: 32px 26px; max-width: 460px; width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.25); text-align: center; max-height: 92vh; overflow-y: auto; }
+  #sub-lock .sub-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; background: #fee2e2; color: #b91c1c; font-size: 12px; font-weight: 700; margin-bottom: 16px; letter-spacing: .4px; }
+  #sub-lock h1 { font-size: 22px; font-weight: 700; color: #0f172a; margin-bottom: 10px; }
+  #sub-lock p { color: #64748b; font-size: 14px; margin-bottom: 20px; line-height: 1.55; }
+  #sub-lock .sub-expiry { background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e9ebef; font-size: 13px; color: #334155; margin-bottom: 20px; text-align: left; }
+  #sub-lock .sub-expiry strong { color: #0f172a; }
+  .sub-btn { display: block; width: 100%; padding: 13px 20px; border-radius: 10px; font-weight: 600; font-size: 14px; border: none; cursor: pointer; transition: .15s; margin-bottom: 10px; text-decoration: none; text-align: center; }
+  .sub-btn.primary { background: #2563eb; color: #fff; }
+  .sub-btn.primary:hover { background: #1d4ed8; }
+  .sub-btn.ghost { background: #fff; color: #0f172a; border: 1px solid #dde1e7; }
+  .sub-btn.ghost:hover { background: #f8fafc; }
+  #sub-modal h2 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  #sub-modal .sub-lead { font-size: 13px; color: #64748b; margin-bottom: 20px; line-height: 1.55; }
+  #sub-modal .sub-price { display: flex; justify-content: space-between; align-items: center; padding: 14px; background: #eff6ff; border-radius: 10px; border: 1px solid #dbeafe; margin-bottom: 20px; }
+  #sub-modal .sub-price .lbl { font-size: 13px; color: #1d4ed8; font-weight: 600; }
+  #sub-modal .sub-price .val { font-size: 20px; font-weight: 800; color: #1d4ed8; }
+  #sub-modal .sub-steps { font-size: 12.5px; color: #475569; line-height: 1.7; margin-bottom: 20px; text-align: left; background: #f8fafc; padding: 14px; border-radius: 10px; border: 1px solid #e9ebef; }
+  #sub-modal .sub-steps ol { padding-left: 18px; margin: 0; }
+  .sub-myshop-card { background: #fff; border-radius: 12px; border: 1px solid #e9ebef; padding: 18px; box-shadow: 0 1px 2px rgba(15,23,42,.04); margin-bottom: 16px; }
+  .sub-myshop-card .sub-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .sub-myshop-card .sub-title { font-size: 15px; font-weight: 600; color: #0f172a; }
+  .sub-myshop-card .sub-status { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; letter-spacing: .3px; }
+  .sub-myshop-card .sub-status.active { background: #dcfce7; color: #15803d; }
+  .sub-myshop-card .sub-status.expired { background: #fee2e2; color: #b91c1c; }
+  .sub-myshop-card .sub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .sub-myshop-card .sub-cell { background: #f8fafc; padding: 10px 12px; border-radius: 8px; border: 1px solid #e9ebef; }
+  .sub-myshop-card .sub-cell .lbl { font-size: 11px; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: .4px; }
+  .sub-myshop-card .sub-cell .val { font-weight: 700; margin-top: 3px; font-size: 14px; color: #0f172a; }
+  .sub-myshop-card .sub-renew { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
+  .sub-myshop-card .sub-renew:hover { background: #1d4ed8; }
+</style>
+
+<div id="sub-lock">
+  <div class="sub-box">
+    <div class="sub-badge">SUBSCRIPTION EXPIRED</div>
+    <h1>Your subscription has ended</h1>
+    <p>Renew to continue using the app. Your data is safe and becomes available immediately after payment.</p>
+    <div class="sub-expiry">
+      <div>Expired on: <strong id="sub-lock-date">—</strong></div>
+      <div style="margin-top:6px">Plan: <strong id="sub-lock-price">—</strong></div>
+    </div>
+    <button class="sub-btn primary" id="sub-lock-renew">Renew Subscription</button>
+    <button class="sub-btn ghost" id="sub-lock-refresh">Already paid? Refresh</button>
+  </div>
+</div>
+
+<div id="sub-modal">
+  <div class="sub-box">
+    <h2>Renew Subscription</h2>
+    <div class="sub-lead">You'll be redirected to Cashfree to approve a UPI AutoPay mandate. This is safe and standard.</div>
+    <div class="sub-price">
+      <div class="lbl">Amount</div>
+      <div class="val" id="sub-modal-price">—</div>
+    </div>
+    <div class="sub-steps">
+      <strong style="color:#0f172a">How it works:</strong>
+      <ol>
+        <li>Click Proceed to Payment</li>
+        <li>Approve the mandate in GPay / PhonePe / Paytm</li>
+        <li>You'll return here automatically</li>
+        <li>Subscription extended by 1 year</li>
+      </ol>
+    </div>
+    <button class="sub-btn primary" id="sub-modal-proceed">Proceed to Payment</button>
+    <button class="sub-btn ghost" id="sub-modal-close">Close</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ══════════════════════════════════════════════════════════════
+  // CONFIG — change these two values per customer
+  // ══════════════════════════════════════════════════════════════
+  const CONFIG = {
+    priceRupees: 5000,
+    returnUrl:   window.location.origin + window.location.pathname,
+  };
+  // ══════════════════════════════════════════════════════════════
+
+  let subscriptionData = null;
+  let checkInFlight = false;
+
+  function priceStr() { return "₹" + Number(CONFIG.priceRupees).toLocaleString("en-IN"); }
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  }
+  function daysLeft(iso) {
+    return Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000));
+  }
+
+  async function fetchSubscription() {
+    try {
+      const { data, error } = await window.sb.from("subscriptions").select("end_date, status").order("id").limit(1).maybeSingle();
+      if (error) throw error;
+      subscriptionData = data || null;
+    } catch (e) {
+      console.warn("[SUB] fetch failed", e);
+      subscriptionData = null;
+    }
+    return subscriptionData;
+  }
+
+  function isActive() {
+    if (!subscriptionData || !subscriptionData.end_date) return false;
+    return new Date(subscriptionData.end_date).getTime() > Date.now() && subscriptionData.status === "active";
+  }
+
+  function showLock() {
+    document.getElementById("sub-lock-date").textContent = fmtDate(subscriptionData?.end_date);
+    document.getElementById("sub-lock-price").textContent = priceStr() + " / year";
+    document.getElementById("sub-lock").classList.add("show");
+    const app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+  }
+  function hideLock() {
+    document.getElementById("sub-lock").classList.remove("show");
+    const app = document.getElementById("app");
+    if (app) app.style.visibility = "";
+  }
+
+  function openModal() {
+    document.getElementById("sub-modal-price").textContent = priceStr() + " / year";
+    document.getElementById("sub-modal").classList.add("show");
+  }
+  function closeModal() {
+    document.getElementById("sub-modal").classList.remove("show");
+  }
+
+  function injectMyShopCard() {
+    if (location.hash !== "#/myshop") return;
+    const content = document.getElementById("content");
+    if (!content || content.querySelector(".sub-myshop-card") || !subscriptionData) return;
+
+    const active = isActive();
+    const card = document.createElement("div");
+    card.className = "sub-myshop-card";
+    card.innerHTML = `
+      <div class="sub-header">
+        <div class="sub-title">Subscription</div>
+        <div class="sub-status ${active ? "active" : "expired"}">${active ? "ACTIVE" : "EXPIRED"}</div>
+      </div>
+      <div class="sub-grid">
+        <div class="sub-cell">
+          <div class="lbl">Expires on</div>
+          <div class="val">${fmtDate(subscriptionData.end_date)}</div>
+        </div>
+        <div class="sub-cell">
+          <div class="lbl">${active ? "Days remaining" : "Status"}</div>
+          <div class="val" style="color:${active ? "#15803d" : "#dc2626"}">
+            ${active ? daysLeft(subscriptionData.end_date) + " days" : "Expired"}
+          </div>
+        </div>
+      </div>
+      <button class="sub-renew">${active ? "Extend Subscription" : "Renew Now"}</button>
+    `;
+    content.insertBefore(card, content.firstChild);
+    card.querySelector(".sub-renew").onclick = openModal;
+  }
+  setInterval(injectMyShopCard, 800);
+
+  async function checkSubscription() {
+    if (checkInFlight) return;
+    checkInFlight = true;
+    await fetchSubscription();
+    checkInFlight = false;
+
+    if (!subscriptionData) { showLock(); return false; }
+    if (!isActive())       { showLock(); return false; }
+    hideLock();
+    return true;
+  }
+
+  // Intercept route
+  const _origRoute = window.route;
+  window.route = async function() {
+    const active = await checkSubscription();
+    if (!active) return Promise.resolve();
+    return _origRoute.apply(this, arguments);
+  };
+  try { window.removeEventListener("hashchange", _origRoute); } catch(e) {}
+  window.addEventListener("hashchange", window.route);
+
+  // Wire buttons
+  document.getElementById("sub-lock-renew").onclick = openModal;
+  document.getElementById("sub-lock-refresh").onclick = async () => {
+    await fetchSubscription();
+    if (isActive()) { hideLock(); location.reload(); }
+  };
+  document.getElementById("sub-modal-close").onclick = closeModal;
+  document.getElementById("sub-modal-proceed").onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = "Please wait…";
+    try {
+      const { data, error } = await window.sb.functions.invoke("create-cashfree-subscription", {
+        body: {
+          customerName:  (window.SETTINGS && window.SETTINGS.owner_name) || "Customer",
+          customerEmail: (window.SETTINGS && window.SETTINGS.email)      || "customer@example.com",
+          customerPhone: (window.SETTINGS && window.SETTINGS.phone)      || "9999999999",
+          returnUrl:     CONFIG.returnUrl,
+        },
+      });
+      if (error) throw error;
+      if (!data || !data.authLink) throw new Error("No auth link received");
+      window.location.href = data.authLink;
+    } catch (err) {
+      console.error("[SUB] invoke failed", err);
+      alert("Could not start payment: " + (err.message || err));
+      btn.disabled = false;
+      btn.textContent = "Proceed to Payment";
+    }
+  };
+
+  // Boot check
+  setTimeout(() => {
+    if (window.SESSION) {
+      checkSubscription();
+    } else {
+      const w = setInterval(() => {
+        if (window.SESSION) { clearInterval(w); checkSubscription(); }
+      }, 500);
+    }
+  }, 1200);
+
+  window.Subscription = {
+    check: checkSubscription,
+    open: openModal,
+    refresh: fetchSubscription,
+  };
+})();
+</script>  
 </body>
 </html>
