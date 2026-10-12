@@ -5860,7 +5860,50 @@ window.BluetoothPrinter = (function(){
     autoCreate:    true
   };
 </script>
+<style>
+  /* Subscription card — animated glowing border */
+  .sub-card-animated {
+    position: relative;
+    border: 1px solid transparent !important;
+    background-clip: padding-box;
+    animation: sub-border-pulse 3s ease-in-out infinite;
+  }
 
+  @keyframes sub-border-pulse {
+    0%, 100% {
+      box-shadow:
+        0 0 0 1px rgba(37, 99, 235, 0.25),
+        0 0 12px rgba(37, 99, 235, 0.15),
+        0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+    50% {
+      box-shadow:
+        0 0 0 2px rgba(37, 99, 235, 0.45),
+        0 0 24px rgba(37, 99, 235, 0.35),
+        0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+  }
+
+  /* Optional: different glow when expired */
+  .sub-card-animated.sub-card-expired {
+    animation: sub-border-pulse-red 3s ease-in-out infinite;
+  }
+
+  @keyframes sub-border-pulse-red {
+    0%, 100% {
+      box-shadow:
+        0 0 0 1px rgba(220, 38, 38, 0.25),
+        0 0 12px rgba(220, 38, 38, 0.15),
+        0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+    50% {
+      box-shadow:
+        0 0 0 2px rgba(220, 38, 38, 0.45),
+        0 0 24px rgba(220, 38, 38, 0.35),
+        0 1px 3px rgba(15, 23, 42, 0.05);
+    }
+  }
+</style>
 <!-- ══════════════════════════════════════════════════════════════════
      SUBSCRIPTION BLOCK — full, do not edit
      ══════════════════════════════════════════════════════════════════ -->
@@ -6114,7 +6157,7 @@ window.BluetoothPrinter = (function(){
     ];
   }
 
-  function buildSubCardHTML() {
+   function buildSubCardHTML() {
     const pct = subPercentLeft();
     const days = subDaysLeft();
     const color = subStatusColor();
@@ -6133,11 +6176,11 @@ window.BluetoothPrinter = (function(){
     else { btnText = 'Manage Subscription'; btnId = 'sub-manage-btn'; }
 
     return '' +
-      '<div class="card" id="sub-card-root" style="margin-bottom:16px; max-width:480px; padding:20px;">' +
+      '<div class="card sub-card-animated' + (expired ? ' sub-card-expired' : '') + '" id="sub-card-root" style="margin-bottom:16px; max-width:480px; padding:20px; background:#fff;">' +
         '<div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">' +
           '<div style="position:relative; width:80px; height:80px; flex-shrink:0;">' +
             '<svg width="80" height="80" viewBox="0 0 80 80" style="transform: rotate(-90deg);">' +
-              '<circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>' +
+              '<circle cx="40" cy="40" r="32" fill="none" stroke="#e9ebef" stroke-width="7"/>' +
               '<circle cx="40" cy="40" r="32" fill="none" stroke="' + color + '" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + (circumference - dash) + '"/>' +
             '</svg>' +
             '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column;">' +
@@ -6146,16 +6189,16 @@ window.BluetoothPrinter = (function(){
             '</div>' +
           '</div>' +
           '<div style="flex:1; min-width:0;">' +
-            '<div style="font-size:15px; font-weight:700; color:#f4f4f5; margin-bottom:6px;">' + SUB_PLAN_LABEL + '</div>' +
+            '<div style="font-size:15px; font-weight:700; color:#0f172a; margin-bottom:6px;">' + SUB_PLAN_LABEL + '</div>' +
             '<span style="display:inline-block; background:' + color + '22; color:' + color + '; font-size:10px; font-weight:700; padding:3px 10px; border-radius:999px; border:1px solid ' + color + '44;">● ' + status.toUpperCase() + '</span>' +
           '</div>' +
         '</div>' +
-        '<div style="font-size:12px; color:#94a3b8; line-height:1.9; margin-bottom:14px; padding:10px 12px; background:rgba(255,255,255,0.03); border-radius:10px;">' +
-          '<div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#d4d4d8;">₹' + SUB_PLAN_AMOUNT + ' / year</b></div>' +
-          '<div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#d4d4d8;">' + expiresStr + '</b></div>' +
-          '<div style="display:flex; justify-content:space-between;"><span>Remaining</span>' + (expired ? '<b style="color:#f87171;">Overdue ' + overdue + 'd</b>' : '<b style="color:' + color + ';">' + days + ' days</b>') + '</div>' +
-          '<div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#d4d4d8; font-size:11px;">' + lastPaidStr + '</b></div>' +
-          '<div style="display:flex; justify-content:space-between; padding-top:6px; margin-top:4px; border-top:1px solid rgba(255,255,255,0.05);"><span>Pay to</span><code style="color:#86efac; font-family:monospace; font-size:11px;">' + SUB_OWNER_UPI + '</code></div>' +
+        '<div style="font-size:12px; color:#475569; line-height:1.9; margin-bottom:14px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e9ebef;">' +
+          '<div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#0f172a;">₹' + SUB_PLAN_AMOUNT + ' / year</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#0f172a;">' + expiresStr + '</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Remaining</span>' + (expired ? '<b style="color:#dc2626;">Overdue ' + overdue + 'd</b>' : '<b style="color:' + color + ';">' + days + ' days</b>') + '</div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#0f172a; font-size:11px;">' + lastPaidStr + '</b></div>' +
+          '<div style="display:flex; justify-content:space-between; padding-top:6px; margin-top:4px; border-top:1px solid #e9ebef;"><span>Pay to</span><code style="color:#15803d; font-family:monospace; font-size:11px;">' + SUB_OWNER_UPI + '</code></div>' +
         '</div>' +
         '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
           '<button id="' + btnId + '" class="btn btn-primary btn-sm" style="flex:1; justify-content:center; font-weight:600;">' + btnText + '</button>' +
