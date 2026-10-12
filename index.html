@@ -5784,5 +5784,976 @@ window.BluetoothPrinter = (function(){
   console.log('[PDF] PART 31 ready');
 })();
 </script>
+<!-- ============================================================
+
+\&#x20;    SUBSCRIPTION CONFIG — Edit these values for each new app
+
+
+<script>
+
+\&#x20; window.SUBSCRIPTION\\\_CONFIG = {
+
+\&#x20;   // ---- REQUIRED: your payment + contact info ----
+
+\&#x20;   ownerUpi:      'shopsteward.in@ybl',           // your real UPI ID
+
+\&#x20;   ownerName:     'Samiran Das',                  // shown in UPI app
+
+\&#x20;   whatsapp:      '863756057',                    // your WhatsApp number
+
+\&#x20;   email:         'shopsteward.in@gmail.com',     // support email
+
+
+
+\&#x20;   // ---- Plan details ----
+
+\&#x20;   planAmount:    599,                            // ₹ per year
+
+\&#x20;   planLabel:     'Yearly Subscription',          // card title
+
+
+
+\&#x20;   // ---- Theme (optional — see notes below) ----
+
+\&#x20;   theme:         'auto',                         // 'dark' | 'light' | 'auto'
+
+\&#x20;   accent:        '#22c55e',                      // main accent color
+
+\&#x20;   accentWarning: '#fbbf24',                      // amber (expiring soon)
+
+\&#x20;   accentDanger:  '#ef4444',                      // red (expired)
+
+
+
+\&#x20;   // ---- Behaviour (optional) ----
+
+\&#x20;   reminderDays:  15,                             // show banner N days before expiry
+
+\&#x20;   autoCreate:    true                            // create 1-year sub on first login
+
+\&#x20; };
+
+<!-- ============================================================
+
+&#x20;    SUBSCRIPTION BLOCK — Paste as-is. Do not edit.
+
+&#x20;    Reads settings from window.SUBSCRIPTION\_CONFIG
+
+
+<!-- ==================== BLOCK 1: CORE ==================== -->
+<script>
+
+(function() {
+
+&#x20; 'use strict';
+
+
+
+&#x20; const CFG = window.SUBSCRIPTION\_CONFIG || {};
+
+&#x20; const PLAN\_AMOUNT         = CFG.planAmount    || 599;
+
+&#x20; const PLAN\_LABEL          = CFG.planLabel     || 'Yearly Subscription';
+
+&#x20; const SUPPORT\_WHATSAPP    = CFG.whatsapp      || '';
+
+&#x20; const SUPPORT\_EMAIL       = CFG.email         || '';
+
+&#x20; const REMINDER\_DAYS       = CFG.reminderDays  || 15;
+
+&#x20; const OWNER\_UPI           = CFG.ownerUpi      || '';
+
+&#x20; const OWNER\_NAME          = CFG.ownerName     || '';
+
+&#x20; const THEME               = CFG.theme         || 'auto';
+
+&#x20; const ACCENT              = CFG.accent        || '#22c55e';
+
+&#x20; const ACCENT\_WARN         = CFG.accentWarning || '#fbbf24';
+
+&#x20; const ACCENT\_DANGER       = CFG.accentDanger  || '#ef4444';
+
+&#x20; const AUTO\_CREATE         = CFG.autoCreate !== false;
+
+
+
+&#x20; // Detect theme if 'auto'
+
+&#x20; function detectTheme() {
+
+&#x20;   if (THEME === 'dark' || THEME === 'light') return THEME;
+
+&#x20;   try {
+
+&#x20;     const bg = getComputedStyle(document.body).backgroundColor;
+
+&#x20;     const m = bg.match(/\\d+/g);
+
+&#x20;     if (!m) return 'dark';
+
+&#x20;     const \[r, g, b] = m.map(Number);
+
+&#x20;     const lum = (0.299\*r + 0.587\*g + 0.114\*b) / 255;
+
+&#x20;     return lum < 0.5 ? 'dark' : 'light';
+
+&#x20;   } catch(e) { return 'dark'; }
+
+&#x20; }
+
+&#x20; const RESOLVED\_THEME = detectTheme();
+
+
+
+&#x20; window.SUB = { loaded: false, active: false, expires\_at: null, last\_paid\_at: null, amount: PLAN\_AMOUNT };
+
+&#x20; window.SUB\_THEME = RESOLVED\_THEME;
+
+&#x20; window.SUB\_ACCENT = ACCENT;
+
+&#x20; window.SUB\_ACCENT\_WARN = ACCENT\_WARN;
+
+&#x20; window.SUB\_ACCENT\_DANGER = ACCENT\_DANGER;
+
+&#x20; window.SUB\_PLAN\_AMOUNT = PLAN\_AMOUNT;
+
+&#x20; window.SUB\_PLAN\_LABEL = PLAN\_LABEL;
+
+&#x20; window.SUB\_OWNER\_UPI = OWNER\_UPI;
+
+&#x20; window.SUB\_OWNER\_NAME = OWNER\_NAME;
+
+&#x20; window.SUB\_SUPPORT\_WHATSAPP = SUPPORT\_WHATSAPP;
+
+&#x20; window.SUB\_SUPPORT\_EMAIL = SUPPORT\_EMAIL;
+
+&#x20; window.SUB\_REMINDER\_DAYS = REMINDER\_DAYS;
+
+
+
+&#x20; // ---------- Helpers ----------
+
+&#x20; window.subDaysLeft = function() {
+
+&#x20;   if (!SUB.expires\_at) return 0;
+
+&#x20;   const diff = new Date(SUB.expires\_at).getTime() - Date.now();
+
+&#x20;   return Math.max(0, Math.ceil(diff / (1000 \* 60 \* 60 \* 24)));
+
+&#x20; };
+
+&#x20; window.subPercentLeft = function() {
+
+&#x20;   if (!SUB.expires\_at) return 0;
+
+&#x20;   const total = 365 \* 24 \* 60 \* 60 \* 1000;
+
+&#x20;   const left = Math.max(0, new Date(SUB.expires\_at).getTime() - Date.now());
+
+&#x20;   return Math.max(0, Math.min(100, Math.round((left / total) \* 100)));
+
+&#x20; };
+
+&#x20; window.subDaysOverdue = function() {
+
+&#x20;   if (!SUB.expires\_at) return 0;
+
+&#x20;   const diff = Date.now() - new Date(SUB.expires\_at).getTime();
+
+&#x20;   return Math.max(0, Math.ceil(diff / (1000 \* 60 \* 60 \* 24)));
+
+&#x20; };
+
+&#x20; window.isSubActive = function() {
+
+&#x20;   if (!SUB.expires\_at) return false;
+
+&#x20;   return SUB.active === true \&\& new Date(SUB.expires\_at).getTime() > Date.now();
+
+&#x20; };
+
+&#x20; window.isSubExpiringSoon = function() {
+
+&#x20;   return isSubActive() \&\& subDaysLeft() <= REMINDER\_DAYS;
+
+&#x20; };
+
+&#x20; window.isSubExpired = function() { return !isSubActive(); };
+
+&#x20; window.subStatusColor = function() {
+
+&#x20;   if (isSubExpired()) return ACCENT\_DANGER;
+
+&#x20;   if (subDaysLeft() <= REMINDER\_DAYS) return ACCENT\_WARN;
+
+&#x20;   return ACCENT;
+
+&#x20; };
+
+&#x20; window.subStatusLabel = function() {
+
+&#x20;   if (isSubExpired()) return 'Expired';
+
+&#x20;   if (subDaysLeft() <= REMINDER\_DAYS) return 'Expiring Soon';
+
+&#x20;   return 'Active';
+
+&#x20; };
+
+
+
+&#x20; // ---------- Load subscription ----------
+
+&#x20; window.loadSubscription = async function() {
+
+&#x20;   try {
+
+&#x20;     const { data, error } = await sb.from('subscriptions').select('\*').eq('id', 1).maybeSingle();
+
+&#x20;     if (error) throw error;
+
+
+
+&#x20;     if (!data \&\& AUTO\_CREATE) {
+
+&#x20;       const now = new Date();
+
+&#x20;       const nextYear = new Date(now);
+
+&#x20;       nextYear.setFullYear(nextYear.getFullYear() + 1);
+
+&#x20;       const { data: created, error: createErr } = await sb.from('subscriptions').insert({
+
+&#x20;         id: 1, active: true,
+
+&#x20;         started\_at: now.toISOString(),
+
+&#x20;         expires\_at: nextYear.toISOString(),
+
+&#x20;         amount: PLAN\_AMOUNT,
+
+&#x20;         notes: 'Auto-created on first login'
+
+&#x20;       }).select().single();
+
+&#x20;       if (createErr) throw createErr;
+
+&#x20;       Object.assign(SUB, { loaded: true, active: true, expires\_at: created.expires\_at, last\_paid\_at: created.last\_paid\_at, amount: created.amount || PLAN\_AMOUNT });
+
+&#x20;     } else if (data) {
+
+&#x20;       Object.assign(SUB, {
+
+&#x20;         loaded: true,
+
+&#x20;         active: !!data.active,
+
+&#x20;         expires\_at: data.expires\_at,
+
+&#x20;         last\_paid\_at: data.last\_paid\_at,
+
+&#x20;         amount: data.amount || PLAN\_AMOUNT
+
+&#x20;       });
+
+&#x20;     }
+
+&#x20;   } catch (e) {
+
+&#x20;     console.warn('\[SUB] load failed:', e.message);
+
+&#x20;     SUB.loaded = true;
+
+&#x20;     SUB.active = true;
+
+&#x20;     SUB.expires\_at = new Date(Date.now() + 365 \* 24 \* 60 \* 60 \* 1000).toISOString();
+
+&#x20;   }
+
+&#x20; };
+
+
+
+&#x20; // ---------- Save guard ----------
+
+&#x20; window.blockIfExpired = function() {
+
+&#x20;   if (isSubActive()) return true;
+
+&#x20;   if (typeof openSubscriptionExpiredModal === 'function') {
+
+&#x20;     openSubscriptionExpiredModal();
+
+&#x20;   } else {
+
+&#x20;     alert('Your subscription has expired. Please renew for ₹' + PLAN\_AMOUNT + '.');
+
+&#x20;   }
+
+&#x20;   return false;
+
+&#x20; };
+
+
+
+&#x20; // Auto-refresh UI every 60s
+
+&#x20; setInterval(() => {
+
+&#x20;   if (SUB.loaded \&\& typeof updateSubscriptionUI === 'function') {
+
+&#x20;     try { updateSubscriptionUI(); } catch(e) {}
+
+&#x20;   }
+
+&#x20; }, 60000);
+
+})();
+
+
+<!-- ==================== BLOCK 2: SIDEBAR PILL + TOP BANNER ==================== -->
+<script>
+
+(function() {
+
+&#x20; 'use strict';
+
+
+
+&#x20; window.renderSubSidebarPill = function() {
+
+&#x20;   const sidebar = document.querySelector('.sidebar');
+
+&#x20;   if (!sidebar) return;
+
+&#x20;   let pill = document.getElementById('sub-sidebar-pill');
+
+&#x20;   if (!pill) {
+
+&#x20;     pill = document.createElement('a');
+
+&#x20;     pill.id = 'sub-sidebar-pill';
+
+&#x20;     pill.href = '#/myshop';
+
+&#x20;     pill.style.cssText = `
+
+&#x20;       display:block; margin-top:8px; margin-bottom:6px;
+
+&#x20;       padding:10px 12px; border-radius:14px;
+
+&#x20;       background: linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%), rgba(30, 41, 59, 0.55);
+
+&#x20;       border: 1px solid rgba(255,255,255,0.08);
+
+&#x20;       box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+
+&#x20;       text-decoration:none; transition: all 0.2s ease; cursor:pointer;
+
+&#x20;     `;
+
+&#x20;     const calcBtn = document.getElementById('btn-calc');
+
+&#x20;     if (calcBtn) sidebar.insertBefore(pill, calcBtn);
+
+&#x20;     else sidebar.appendChild(pill);
+
+&#x20;   }
+
+
+
+&#x20;   if (!SUB.loaded) { pill.style.display = 'none'; return; }
+
+&#x20;   pill.style.display = 'block';
+
+&#x20;   const color = subStatusColor();
+
+&#x20;   const pct = subPercentLeft();
+
+&#x20;   const days = subDaysLeft();
+
+&#x20;   const label = days > 0 ? days + 'd' : 'Expired';
+
+
+
+&#x20;   pill.innerHTML = `
+
+&#x20;     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+
+&#x20;       <div style="display:flex; align-items:center; gap:6px;">
+
+&#x20;         <span style="font-size:13px;">⭐</span>
+
+&#x20;         <span style="font-size:11px; font-weight:700; color:#e4e4e7; letter-spacing:0.3px;">Pro Plan</span>
+
+&#x20;       </div>
+
+&#x20;       <span style="font-size:10px; font-weight:700; color:${color};">${label}</span>
+
+&#x20;     </div>
+
+&#x20;     <div style="height:5px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden;">
+
+&#x20;       <div style="height:100%; width:${pct}%; background:${color}; border-radius:999px; transition: width 0.6s ease;"></div>
+
+&#x20;     </div>
+
+&#x20;     <div style="font-size:9px; color:#94a3b8; margin-top:5px;">${subStatusLabel()}</div>
+
+&#x20;   `;
+
+&#x20; };
+
+
+
+&#x20; window.renderSubTopBanner = function() {
+
+&#x20;   const main = document.querySelector('.main');
+
+&#x20;   if (!main) return;
+
+&#x20;   const existing = document.getElementById('sub-top-banner');
+
+&#x20;   if (existing) existing.remove();
+
+
+
+&#x20;   if (!SUB.loaded) return;
+
+&#x20;   if (isSubActive() \&\& !isSubExpiringSoon()) return;
+
+
+
+&#x20;   const expired = isSubExpired();
+
+&#x20;   const pct = subPercentLeft();
+
+&#x20;   const days = subDaysLeft();
+
+&#x20;   const overdue = subDaysOverdue();
+
+
+
+&#x20;   const bg = expired
+
+&#x20;     ? 'linear-gradient(180deg, rgba(220,38,38,0.20) 0%, rgba(220,38,38,0.06) 100%), rgba(30, 15, 15, 0.6)'
+
+&#x20;     : 'linear-gradient(180deg, rgba(251,191,36,0.20) 0%, rgba(251,191,36,0.06) 100%), rgba(30, 22, 10, 0.6)';
+
+&#x20;   const border = expired ? 'rgba(248,113,113,0.35)' : 'rgba(251,191,36,0.35)';
+
+&#x20;   const barColor = expired ? ACCENT\_DANGER : ACCENT\_WARN;
+
+&#x20;   const textColor = expired ? '#fca5a5' : '#fcd34d';
+
+
+
+&#x20;   const banner = document.createElement('div');
+
+&#x20;   banner.id = 'sub-top-banner';
+
+&#x20;   banner.style.cssText = `margin:0 0 16px 0; padding:14px 18px; border-radius:16px; background:${bg}; border:1px solid ${border}; box-shadow: 0 4px 16px rgba(0,0,0,0.3);`;
+
+&#x20;   banner.innerHTML = `
+
+&#x20;     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">
+
+&#x20;       <div style="font-size:13px; font-weight:600; color:${textColor};">⚠ ${expired ? 'Subscription expired' : 'Subscription ending soon'}</div>
+
+&#x20;       <button id="sub-banner-renew" style="background:linear-gradient(180deg, ${ACCENT} 0%, #15803d 100%); color:#fff; border:1px solid rgba(255,255,255,0.25); padding:6px 16px; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer;">Renew Now ₹${PLAN\_AMOUNT}</button>
+
+&#x20;     </div>
+
+&#x20;     <div style="display:flex; align-items:center; gap:10px;">
+
+&#x20;       <div style="flex:1; height:6px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden;">
+
+&#x20;         <div style="height:100%; width:${pct}%; background:${barColor}; border-radius:999px;"></div>
+
+&#x20;       </div>
+
+&#x20;       <div style="font-size:11px; font-weight:600; color:${textColor}; white-space:nowrap;">${expired ? overdue + ' days overdue' : days + ' days left'}</div>
+
+&#x20;     </div>
+
+&#x20;   `;
+
+&#x20;   main.insertBefore(banner, main.firstChild);
+
+&#x20;   const btn = banner.querySelector('#sub-banner-renew');
+
+&#x20;   if (btn) btn.onclick = () => openSubscriptionModal();
+
+&#x20; };
+
+
+
+&#x20; window.updateSubscriptionUI = function() {
+
+&#x20;   if (typeof renderSubSidebarPill === 'function') renderSubSidebarPill();
+
+&#x20;   if (typeof renderSubTopBanner === 'function') renderSubTopBanner();
+
+&#x20; };
+
+
+
+&#x20; const \_origLayout = window.renderLayout;
+
+&#x20; if (typeof \_origLayout === 'function') {
+
+&#x20;   window.renderLayout = function() {
+
+&#x20;     \_origLayout.apply(this, arguments);
+
+&#x20;     try { renderSubSidebarPill(); renderSubTopBanner(); } catch(e) {}
+
+&#x20;   };
+
+&#x20; }
+
+&#x20; const \_origRoute = window.route;
+
+&#x20; if (typeof \_origRoute === 'function') {
+
+&#x20;   window.route = async function() {
+
+&#x20;     const r = await \_origRoute.apply(this, arguments);
+
+&#x20;     try { renderSubSidebarPill(); renderSubTopBanner(); } catch(e) {}
+
+&#x20;     return r;
+
+&#x20;   };
+
+&#x20;   try { window.removeEventListener('hashchange', \_origRoute); } catch(e) {}
+
+&#x20;   window.addEventListener('hashchange', window.route);
+
+&#x20; }
+
+})();
+
+
+<!-- ==================== BLOCK 3: CARD + MODALS ==================== -->
+<script>
+
+(function() {
+
+&#x20; 'use strict';
+
+
+
+&#x20; function buildUpiString(amount, note) {
+
+&#x20;   const amt = Number(amount).toFixed(2);
+
+&#x20;   const tn = encodeURIComponent((note || 'Subscription').substring(0, 50));
+
+&#x20;   const pn = encodeURIComponent(OWNER\_NAME);
+
+&#x20;   return `upi://pay?pa=${OWNER\_UPI}\&pn=${pn}\&am=${amt}\&cu=INR\&tn=${tn}`;
+
+&#x20; }
+
+
+
+&#x20; function getQrUrls(str) {
+
+&#x20;   const enc = encodeURIComponent(str);
+
+&#x20;   return \[
+
+&#x20;     `https://api.qrserver.com/v1/create-qr-code/?size=400x400\&data=${enc}\&margin=10`,
+
+&#x20;     `https://quickchart.io/qr?text=${enc}\&size=400\&margin=2`,
+
+&#x20;     `https://chart.googleapis.com/chart?chs=400x400\&cht=qr\&chl=${enc}\&choe=UTF-8`
+
+&#x20;   ];
+
+&#x20; }
+
+
+
+&#x20; // ---------- CARD ----------
+
+&#x20; function buildSubCardHTML() {
+
+&#x20;   const pct = subPercentLeft();
+
+&#x20;   const days = subDaysLeft();
+
+&#x20;   const color = subStatusColor();
+
+&#x20;   const status = subStatusLabel();
+
+&#x20;   const expired = isSubExpired();
+
+&#x20;   const overdue = subDaysOverdue();
+
+&#x20;   const expiringSoon = isSubExpiringSoon();
+
+&#x20;   const expiresStr = SUB.expires\_at ? fmtDate(SUB.expires\_at) : '—';
+
+&#x20;   const lastPaidStr = SUB.last\_paid\_at ? fmtDate(SUB.last\_paid\_at) : 'First activation';
+
+&#x20;   const circumference = 2 \* Math.PI \* 32;
+
+&#x20;   const dash = (pct / 100) \* circumference;
+
+
+
+&#x20;   let btnText, btnId;
+
+&#x20;   if (expired) { btnText = 'Subscribe Now ₹' + PLAN\_AMOUNT; btnId = 'sub-main-btn'; }
+
+&#x20;   else if (expiringSoon) { btnText = 'Renew Now ₹' + PLAN\_AMOUNT; btnId = 'sub-main-btn'; }
+
+&#x20;   else { btnText = 'Manage Subscription'; btnId = 'sub-manage-btn'; }
+
+
+
+&#x20;   return `
+
+&#x20;     <div class="card" id="sub-card-root" style="margin-bottom:16px; max-width:480px; padding:20px;">
+
+&#x20;       <div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">
+
+&#x20;         <div style="position:relative; width:80px; height:80px; flex-shrink:0;">
+
+&#x20;           <svg width="80" height="80" viewBox="0 0 80 80" style="transform: rotate(-90deg);">
+
+&#x20;             <circle cx="40" cy="40" r="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="7"/>
+
+&#x20;             <circle cx="40" cy="40" r="32" fill="none" stroke="${color}" stroke-width="7" stroke-linecap="round" stroke-dasharray="${circumference}" stroke-dashoffset="${circumference - dash}"/>
+
+&#x20;           </svg>
+
+&#x20;           <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column;">
+
+&#x20;             <div style="font-size:16px; font-weight:800; color:${color}; line-height:1;">${pct}%</div>
+
+&#x20;             <div style="font-size:8px; color:#94a3b8; margin-top:1px;">LEFT</div>
+
+&#x20;           </div>
+
+&#x20;         </div>
+
+&#x20;         <div style="flex:1; min-width:0;">
+
+&#x20;           <div style="font-size:15px; font-weight:700; color:#f4f4f5; margin-bottom:6px;">${PLAN\_LABEL}</div>
+
+&#x20;           <span style="display:inline-block; background:${color}22; color:${color}; font-size:10px; font-weight:700; padding:3px 10px; border-radius:999px; border:1px solid ${color}44;">
+
+&#x20;             ● ${status.toUpperCase()}
+
+&#x20;           </span>
+
+&#x20;         </div>
+
+&#x20;       </div>
+
+&#x20;       <div style="font-size:12px; color:#94a3b8; line-height:1.9; margin-bottom:14px; padding:10px 12px; background:rgba(255,255,255,0.03); border-radius:10px;">
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#d4d4d8;">₹${PLAN\_AMOUNT} / year</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#d4d4d8;">${expiresStr}</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Remaining</span>${expired ? `<b style="color:#f87171;">Overdue ${overdue}d</b>` : `<b style="color:${color};">${days} days</b>`}</div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#d4d4d8; font-size:11px;">${lastPaidStr}</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between; padding-top:6px; margin-top:4px; border-top:1px solid rgba(255,255,255,0.05);">
+
+&#x20;           <span>Pay to</span>
+
+&#x20;           <code style="color:#86efac; font-family:'Courier New',monospace; font-size:11px;">${OWNER\_UPI}</code>
+
+&#x20;         </div>
+
+&#x20;       </div>
+
+&#x20;       <div style="display:flex; gap:8px; flex-wrap:wrap;">
+
+&#x20;         <button id="${btnId}" class="btn btn-primary btn-sm" style="flex:1; justify-content:center; font-weight:600;">${btnText}</button>
+
+&#x20;         <a id="sub-support-link" target="\_blank" class="btn btn-ghost btn-sm" style="justify-content:center;">Support</a>
+
+&#x20;       </div>
+
+&#x20;     </div>
+
+&#x20;   `;
+
+&#x20; }
+
+
+
+&#x20; const \_origMyShop = window.renderMyShop;
+
+&#x20; if (typeof \_origMyShop === 'function') {
+
+&#x20;   window.renderMyShop = function(content) {
+
+&#x20;     \_origMyShop.apply(this, arguments);
+
+&#x20;     try {
+
+&#x20;       const old = content.querySelector('#sub-card-root');
+
+&#x20;       if (old) old.remove();
+
+&#x20;       const wrap = document.createElement('div');
+
+&#x20;       wrap.innerHTML = buildSubCardHTML();
+
+&#x20;       content.insertBefore(wrap.firstElementChild, content.firstChild);
+
+&#x20;       const mainBtn = content.querySelector('#sub-main-btn');
+
+&#x20;       if (mainBtn) mainBtn.onclick = () => openSubscriptionModal();
+
+&#x20;       const mgBtn = content.querySelector('#sub-manage-btn');
+
+&#x20;       if (mgBtn) mgBtn.onclick = () => openSubscriptionManageModal();
+
+&#x20;       const sLink = content.querySelector('#sub-support-link');
+
+&#x20;       if (sLink) sLink.href = waLink(SUPPORT\_WHATSAPP, `Hi, I need help with my subscription.\\nShop: ${SETTINGS.shop\_name || ''}`);
+
+&#x20;     } catch(e) { console.warn('\[SUB] card:', e); }
+
+&#x20;   };
+
+&#x20; }
+
+
+
+&#x20; // ---------- SUBSCRIBE MODAL ----------
+
+&#x20; window.openSubscriptionModal = function() {
+
+&#x20;   const str = buildUpiString(PLAN\_AMOUNT, 'Subscription renewal - ' + (SETTINGS.shop\_name || 'Shop'));
+
+&#x20;   const urls = getQrUrls(str);
+
+&#x20;   openModal(`
+
+&#x20;     <div style="max-width:620px; margin:0 auto;">
+
+&#x20;       <h2 style="font-size:18px; font-weight:700; margin-bottom:4px;">Subscribe to Pro</h2>
+
+&#x20;       <p style="font-size:13px; color:#a1a1aa; margin-bottom:16px;">Pay ₹${PLAN\_AMOUNT} for 1 year of unlimited access.</p>
+
+&#x20;       <div style="display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap;">
+
+&#x20;         <div style="flex:0 0 230px; text-align:center;">
+
+&#x20;           <div style="background:#fff; padding:14px; border-radius:16px; display:inline-block;">
+
+&#x20;             <img id="sub-qr-img" src="${urls\[0]}" style="width:200px; height:200px; display:block; border-radius:6px;">
+
+&#x20;           </div>
+
+&#x20;           <div style="font-size:12px; font-weight:600; color:#86efac; margin-top:10px;">Scan to pay ₹${PLAN\_AMOUNT}</div>
+
+&#x20;         </div>
+
+&#x20;         <div style="flex:1; min-width:240px;">
+
+&#x20;           <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:6px;">UPI ID</div>
+
+&#x20;           <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px;">
+
+&#x20;             <code style="font-size:15px; color:#f4f4f5; font-weight:600; font-family:'Courier New',monospace;">${esc(OWNER\_UPI)}</code>
+
+&#x20;             <button id="sub-copy-upi" class="btn btn-ghost btn-sm">📋 Copy</button>
+
+&#x20;           </div>
+
+&#x20;           <div style="font-size:12px; color:#94a3b8; margin-bottom:14px;">Receiver: <b style="color:#d4d4d8;">${esc(OWNER\_NAME)}</b></div>
+
+&#x20;           <div style="font-size:12px; color:#a1a1aa; line-height:1.9; margin-bottom:16px; padding:12px; background:rgba(255,255,255,0.03); border-radius:10px; border-left:3px solid #22c55e;">
+
+&#x20;             <b style="color:#d4d4d8;">How to activate:</b><br>
+
+&#x20;             1. Pay ₹${PLAN\_AMOUNT} via any UPI app<br>
+
+&#x20;             2. Send the payment screenshot on WhatsApp<br>
+
+&#x20;             3. Activated within a few hours
+
+&#x20;           </div>
+
+&#x20;           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+
+&#x20;             <a id="sub-wa-btn" target="\_blank" class="btn" style="background:#25D366; color:#fff; font-weight:600;">💬 Send screenshot on WhatsApp</a>
+
+&#x20;             <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+
+&#x20;           </div>
+
+&#x20;         </div>
+
+&#x20;       </div>
+
+&#x20;     </div>
+
+&#x20;   `, root => {
+
+&#x20;     root.querySelector('#sub-copy-upi').onclick = async () => {
+
+&#x20;       try { await navigator.clipboard.writeText(OWNER\_UPI); toast('UPI ID copied','success'); }
+
+&#x20;       catch(e) { prompt('Copy:', OWNER\_UPI); }
+
+&#x20;     };
+
+&#x20;     root.querySelector('#sub-wa-btn').href = waLink(SUPPORT\_WHATSAPP,
+
+&#x20;       `Hi, I've paid ₹${PLAN\_AMOUNT} for the yearly subscription.\\n\\nShop: ${SETTINGS.shop\_name || ''}\\nUPI: ${OWNER\_UPI}\\n\\nPlease activate.`);
+
+&#x20;     const img = root.querySelector('#sub-qr-img');
+
+&#x20;     let idx = 1;
+
+&#x20;     img.onerror = () => { if (idx < urls.length) img.src = urls\[idx++]; };
+
+&#x20;   });
+
+&#x20; };
+
+
+
+&#x20; // ---------- MANAGE MODAL ----------
+
+&#x20; window.openSubscriptionManageModal = function() {
+
+&#x20;   const expiresStr = SUB.expires\_at ? fmtDate(SUB.expires\_at) : '—';
+
+&#x20;   const lastPaidStr = SUB.last\_paid\_at ? fmtDate(SUB.last\_paid\_at) : 'First activation';
+
+&#x20;   const days = subDaysLeft();
+
+&#x20;   openModal(`
+
+&#x20;     <div style="max-width:480px; margin:0 auto;">
+
+&#x20;       <h2 style="font-size:18px; font-weight:700; margin-bottom:16px;">Your Subscription</h2>
+
+&#x20;       <div style="background:rgba(255,255,255,0.03); border-radius:12px; padding:14px; font-size:13px; line-height:2; color:#a1a1aa;">
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Status</span><b style="color:#4ade80;">● Active</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#d4d4d8;">₹${PLAN\_AMOUNT} / year</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#d4d4d8;">${expiresStr}</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Days remaining</span><b style="color:#4ade80;">${days} days</b></div>
+
+&#x20;         <div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#d4d4d8;">${lastPaidStr}</b></div>
+
+&#x20;       </div>
+
+&#x20;       <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+
+&#x20;         <a id="sub-manage-wa" target="\_blank" class="btn" style="background:#25D366; color:#fff;">💬 Contact Support</a>
+
+&#x20;         <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+
+&#x20;       </div>
+
+&#x20;     </div>
+
+&#x20;   `, root => {
+
+&#x20;     root.querySelector('#sub-manage-wa').href = waLink(SUPPORT\_WHATSAPP,
+
+&#x20;       `Hi, I want to renew my subscription early.\\nShop: ${SETTINGS.shop\_name || ''}`);
+
+&#x20;   });
+
+&#x20; };
+
+
+
+&#x20; // ---------- EXPIRED MODAL ----------
+
+&#x20; window.openSubscriptionExpiredModal = function() {
+
+&#x20;   const overdue = subDaysOverdue();
+
+&#x20;   const str = buildUpiString(PLAN\_AMOUNT, 'Subscription renewal - ' + (SETTINGS.shop\_name || 'Shop'));
+
+&#x20;   const urls = getQrUrls(str);
+
+&#x20;   openModal(`
+
+&#x20;     <div style="max-width:640px; margin:0 auto;">
+
+&#x20;       <div style="text-align:center; margin-bottom:16px;">
+
+&#x20;         <div style="font-size:32px; margin-bottom:6px;">⚠</div>
+
+&#x20;         <h2 style="font-size:20px; font-weight:700; color:#f87171;">Subscription Expired</h2>
+
+&#x20;         <p style="font-size:13px; color:#a1a1aa; margin-top:4px;">Renew to keep saving data.</p>
+
+&#x20;       </div>
+
+&#x20;       <div style="display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap; padding:18px; background:rgba(255,255,255,0.03); border-radius:16px;">
+
+&#x20;         <div style="flex:0 0 220px; text-align:center;">
+
+&#x20;           <div style="background:#fff; padding:14px; border-radius:16px; display:inline-block;">
+
+&#x20;             <img id="sub-exp-qr-img" src="${urls\[0]}" style="width:190px; height:190px; display:block; border-radius:6px;">
+
+&#x20;           </div>
+
+&#x20;           <div style="font-size:12px; font-weight:600; color:#86efac; margin-top:10px;">Scan to pay ₹${PLAN\_AMOUNT}</div>
+
+&#x20;         </div>
+
+&#x20;         <div style="flex:1; min-width:240px;">
+
+&#x20;           <div style="font-size:16px; font-weight:700; color:#f4f4f5; margin-bottom:4px;">Renew for ₹${PLAN\_AMOUNT}</div>
+
+&#x20;           <div style="font-size:12px; color:#a1a1aa; margin-bottom:14px;">We'll activate within a few hours after we receive your screenshot.</div>
+
+&#x20;           <div style="font-size:11px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:6px;">UPI ID</div>
+
+&#x20;           <div style="background:rgba(255,255,255,0.05); border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px;">
+
+&#x20;             <code style="font-size:14px; color:#f4f4f5; font-weight:600; font-family:'Courier New',monospace;">${esc(OWNER\_UPI)}</code>
+
+&#x20;             <button id="sub-exp-copy" class="btn btn-ghost btn-sm">📋 Copy</button>
+
+&#x20;           </div>
+
+&#x20;           <div style="font-size:12px; color:#94a3b8; margin-bottom:14px;">Receiver: <b style="color:#d4d4d8;">${esc(OWNER\_NAME)}</b></div>
+
+&#x20;           <div style="display:flex; gap:8px; flex-wrap:wrap;">
+
+&#x20;             <a id="sub-exp-wa" target="\_blank" class="btn" style="background:#25D366; color:#fff; font-weight:600;">💬 WhatsApp us</a>
+
+&#x20;             <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+
+&#x20;           </div>
+
+&#x20;         </div>
+
+&#x20;       </div>
+
+&#x20;       <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06); text-align:center; font-size:12px; color:#94a3b8; line-height:1.9;">
+
+&#x20;         <div style="color:#f87171; font-weight:600; margin-bottom:4px;">⚠ Overdue by ${overdue} day${overdue===1?'':'s'}</div>
+
+&#x20;         <div>✉ <a href="mailto:${esc(SUPPORT\_EMAIL)}" style="color:#86efac;">${esc(SUPPORT\_EMAIL)}</a></div>
+
+&#x20;         <div style="font-size:11px; color:#64748b;
+</script>
 </body>
 </html>
