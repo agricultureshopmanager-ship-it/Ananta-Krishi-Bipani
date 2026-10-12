@@ -5784,5 +5784,548 @@ window.BluetoothPrinter = (function(){
   console.log('[PDF] PART 31 ready');
 })();
 </script>
+<!-- ════════════════════════════════════════════════════════════════
+     SUBSCRIPTION CONFIG — edit these values per app
+     Paste this at the bottom of your HTML, before the subscription block.
+     ════════════════════════════════════════════════════════════════ -->
+<script>
+  window.SUBSCRIPTION_CONFIG = {
+    // ---- Owner (you) ----
+    ownerUpi:      'shopsteward.in@ybl',
+    ownerName:     'Samiran Das',
+    whatsapp:      '918637560557',             // country code + 10-digit, no spaces
+    email:         'shopsteward.in@gmail.com',
+
+    // ---- Plan ----
+    planAmount:    599,
+    planLabel:     'Yearly Subscription',
+
+    // ---- Theme ----
+    theme:         'auto',                     // 'auto' | 'dark' | 'light'
+    accent:        '#22c55e',
+    accentWarning: '#fbbf24',
+    accentDanger:  '#ef4444',
+
+    // ---- Behaviour ----
+    reminderDays:  15,
+    autoCreate:    true
+  };
+</script>
+     <!-- ════════════════════════════════════════════════════════════════
+     SUBSCRIPTION BLOCK — paste right after the config.
+     Contains BLOCK 1 (core), BLOCK 2 (UI), BLOCK 3 (card + modals + guards).
+     ════════════════════════════════════════════════════════════════ -->
+
+<!-- ==================== BLOCK 1: CORE ==================== -->
+<script>
+(function () {
+  'use strict';
+
+  const CFG = window.SUBSCRIPTION_CONFIG || {};
+  const PLAN_AMOUNT      = CFG.planAmount    || 599;
+  const PLAN_LABEL       = CFG.planLabel     || 'Yearly Subscription';
+  const OWNER_UPI        = CFG.ownerUpi      || '';
+  const OWNER_NAME       = CFG.ownerName     || '';
+  const SUPPORT_WHATSAPP = CFG.whatsapp      || '';
+  const SUPPORT_EMAIL    = CFG.email         || '';
+  const REMINDER_DAYS    = CFG.reminderDays  || 15;
+  const THEME            = CFG.theme         || 'auto';
+  const ACCENT           = CFG.accent        || '#22c55e';
+  const ACCENT_WARN      = CFG.accentWarning || '#fbbf24';
+  const ACCENT_DANGER    = CFG.accentDanger  || '#ef4444';
+  const AUTO_CREATE      = CFG.autoCreate !== false;
+
+  window.SUB_PLAN_AMOUNT      = PLAN_AMOUNT;
+  window.SUB_PLAN_LABEL       = PLAN_LABEL;
+  window.SUB_OWNER_UPI        = OWNER_UPI;
+  window.SUB_OWNER_NAME       = OWNER_NAME;
+  window.SUB_SUPPORT_WHATSAPP = SUPPORT_WHATSAPP;
+  window.SUB_SUPPORT_EMAIL    = SUPPORT_EMAIL;
+  window.SUB_REMINDER_DAYS    = REMINDER_DAYS;
+  window.SUB_ACCENT           = ACCENT;
+  window.SUB_ACCENT_WARN      = ACCENT_WARN;
+  window.SUB_ACCENT_DANGER    = ACCENT_DANGER;
+
+  window.SUB = { loaded: false, active: false, expires_at: null, last_paid_at: null, amount: PLAN_AMOUNT };
+
+  window.subDaysLeft = function () {
+    if (!SUB.expires_at) return 0;
+    return Math.max(0, Math.ceil((new Date(SUB.expires_at).getTime() - Date.now()) / 86400000));
+  };
+  window.subPercentLeft = function () {
+    if (!SUB.expires_at) return 0;
+    const total = 365 * 86400000;
+    const left = Math.max(0, new Date(SUB.expires_at).getTime() - Date.now());
+    return Math.max(0, Math.min(100, Math.round((left / total) * 100)));
+  };
+  window.subDaysOverdue = function () {
+    if (!SUB.expires_at) return 0;
+    return Math.max(0, Math.ceil((Date.now() - new Date(SUB.expires_at).getTime()) / 86400000));
+  };
+  window.isSubActive = function () {
+    if (!SUB.loaded) return true;
+    if (!SUB.expires_at) return false;
+    return SUB.active === true && new Date(SUB.expires_at).getTime() > Date.now();
+  };
+  window.isSubExpiringSoon = function () {
+    return isSubActive() && subDaysLeft() <= REMINDER_DAYS;
+  };
+  window.isSubExpired = function () { return !isSubActive(); };
+  window.subStatusColor = function () {
+    if (isSubExpired()) return ACCENT_DANGER;
+    if (subDaysLeft() <= REMINDER_DAYS) return ACCENT_WARN;
+    return ACCENT;
+  };
+  window.subStatusLabel = function () {
+    if (isSubExpired()) return 'Expired';
+    if (subDaysLeft() <= REMINDER_DAYS) return 'Expiring Soon';
+    return 'Active';
+  };
+
+  window.loadSubscription = async function () {
+    try {
+      if (typeof sb === 'undefined') throw new Error('sb not available');
+      const { data, error } = await sb.from('subscriptions').select('*').eq('id', 1).maybeSingle();
+      if (error) throw error;
+
+      if (!data && AUTO_CREATE) {
+        const now = new Date();
+        const nextYear = new Date(now);
+        nextYear.setFullYear(nextYear.getFullYear() + 1);
+        const { data: created, error: createErr } = await sb.from('subscriptions').insert({
+          id: 1,
+          active: true,
+          started_at: now.toISOString(),
+          expires_at: nextYear.toISOString(),
+          last_paid_at: now.toISOString(),
+          amount: PLAN_AMOUNT,
+          notes: 'Auto-created on first login'
+        }).select().single();
+        if (createErr) throw createErr;
+        Object.assign(SUB, {
+          loaded: true, active: true,
+          expires_at: created.expires_at,
+          last_paid_at: created.last_paid_at,
+          amount: created.amount || PLAN_AMOUNT
+        });
+      } else if (data) {
+        Object.assign(SUB, {
+          loaded: true,
+          active: !!data.active,
+          expires_at: data.expires_at,
+          last_paid_at: data.last_paid_at,
+          amount: data.amount || PLAN_AMOUNT
+        });
+      } else {
+        SUB.loaded = true;
+      }
+    } catch (e) {
+      console.warn('[SUB] load failed:', e.message);
+      SUB.loaded = true;
+      SUB.active = true;
+      SUB.expires_at = new Date(Date.now() + 365 * 86400000).toISOString();
+    }
+  };
+
+  window.waLink = function (phone, text) {
+    return 'https://wa.me/' + String(phone).replace(/\D/g, '') + '?text=' + encodeURIComponent(text || '');
+  };
+})();
+</script>
+
+
+<!-- ==================== BLOCK 2: UI ==================== -->
+<script>
+(function () {
+  'use strict';
+
+  window.renderSubSidebarPill = function () {
+    const sidebar = document.querySelector('.sidebar');
+    if (!sidebar) return;
+    let pill = document.getElementById('sub-sidebar-pill');
+    if (!pill) {
+      pill = document.createElement('a');
+      pill.id = 'sub-sidebar-pill';
+      pill.href = '#/myshop';
+      pill.style.cssText = 'display:block; margin-top:8px; margin-bottom:6px; padding:10px 12px; border-radius:14px; background:#f1f5f9; border:1px solid #e2e8f0; text-decoration:none; cursor:pointer;';
+      const calcBtn = document.getElementById('btn-calc');
+      if (calcBtn) sidebar.insertBefore(pill, calcBtn);
+      else sidebar.appendChild(pill);
+    }
+    if (!window.SUB || !SUB.loaded) { pill.style.display = 'none'; return; }
+    pill.style.display = 'block';
+    const color = subStatusColor();
+    const pct = subPercentLeft();
+    const days = subDaysLeft();
+    const label = days > 0 ? days + 'd' : 'Expired';
+    pill.innerHTML =
+      '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">' +
+        '<div style="display:flex; align-items:center; gap:6px;">' +
+          '<span style="font-size:13px;">⭐</span>' +
+          '<span style="font-size:11px; font-weight:700; color:#0f172a;">Pro Plan</span>' +
+        '</div>' +
+        '<span style="font-size:10px; font-weight:700; color:' + color + ';">' + label + '</span>' +
+      '</div>' +
+      '<div style="height:5px; background:#e2e8f0; border-radius:999px; overflow:hidden;">' +
+        '<div style="height:100%; width:' + pct + '%; background:' + color + '; border-radius:999px;"></div>' +
+      '</div>' +
+      '<div style="font-size:9px; color:#64748b; margin-top:5px;">' + subStatusLabel() + '</div>';
+  };
+
+  window.renderSubTopBanner = function () {
+    const main = document.querySelector('.main');
+    if (!main) return;
+    const existing = document.getElementById('sub-top-banner');
+    if (existing) existing.remove();
+    if (!window.SUB || !SUB.loaded) return;
+    if (isSubActive() && !isSubExpiringSoon()) return;
+
+    const expired = isSubExpired();
+    const pct = subPercentLeft();
+    const days = subDaysLeft();
+    const overdue = subDaysOverdue();
+    const barColor = expired ? SUB_ACCENT_DANGER : SUB_ACCENT_WARN;
+    const textColor = expired ? '#991b1b' : '#92400e';
+    const bg = expired ? '#fee2e2' : '#fef3c7';
+    const border = expired ? '#fecaca' : '#fde68a';
+
+    const banner = document.createElement('div');
+    banner.id = 'sub-top-banner';
+    banner.style.cssText = 'margin:0 0 16px 0; padding:14px 18px; border-radius:12px; background:' + bg + '; border:1px solid ' + border + ';';
+    banner.innerHTML =
+      '<div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:8px;">' +
+        '<div style="font-size:13px; font-weight:600; color:' + textColor + ';">⚠ ' + (expired ? 'Subscription expired' : 'Subscription ending soon') + '</div>' +
+        '<button id="sub-banner-renew" style="background:' + SUB_ACCENT + '; color:#fff; border:none; padding:6px 16px; border-radius:8px; font-size:12px; font-weight:600; cursor:pointer;">Renew Now ₹' + SUB_PLAN_AMOUNT + '</button>' +
+      '</div>' +
+      '<div style="display:flex; align-items:center; gap:10px;">' +
+        '<div style="flex:1; height:6px; background:rgba(255,255,255,0.6); border-radius:999px; overflow:hidden;">' +
+          '<div style="height:100%; width:' + pct + '%; background:' + barColor + '; border-radius:999px;"></div>' +
+        '</div>' +
+        '<div style="font-size:11px; font-weight:600; color:' + textColor + '; white-space:nowrap;">' + (expired ? overdue + ' days overdue' : days + ' days left') + '</div>' +
+      '</div>';
+    main.insertBefore(banner, main.firstChild);
+    const btn = banner.querySelector('#sub-banner-renew');
+    if (btn) btn.onclick = function () { openSubscriptionModal(); };
+  };
+
+  window.updateSubscriptionUI = function () {
+    try { renderSubSidebarPill(); } catch (e) {}
+    try { renderSubTopBanner(); } catch (e) {}
+  };
+
+  const _origLayout = window.renderLayout;
+  if (typeof _origLayout === 'function') {
+    window.renderLayout = function () {
+      _origLayout.apply(this, arguments);
+      try { renderSubSidebarPill(); renderSubTopBanner(); } catch (e) {}
+    };
+  }
+
+  const _origRoute = window.route;
+  if (typeof _origRoute === 'function') {
+    window.route = async function () {
+      const r = await _origRoute.apply(this, arguments);
+      try { renderSubSidebarPill(); renderSubTopBanner(); } catch (e) {}
+      return r;
+    };
+    try { window.removeEventListener('hashchange', _origRoute); } catch (e) {}
+    window.addEventListener('hashchange', window.route);
+  }
+
+  setInterval(function () {
+    if (window.SUB && SUB.loaded) updateSubscriptionUI();
+  }, 60000);
+})();
+</script>
+
+
+<!-- ==================== BLOCK 3: CARD + MODALS + GUARDS ==================== -->
+<script>
+(function () {
+  'use strict';
+
+  function buildUpiString(amount, note) {
+    const amt = Number(amount).toFixed(2);
+    const tn = encodeURIComponent((note || 'Subscription').substring(0, 50));
+    const pn = encodeURIComponent(SUB_OWNER_NAME);
+    return 'upi://pay?pa=' + SUB_OWNER_UPI + '&pn=' + pn + '&am=' + amt + '&cu=INR&tn=' + tn;
+  }
+  function getQrUrls(str) {
+    const enc = encodeURIComponent(str);
+    return [
+      'https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=' + enc + '&margin=10',
+      'https://quickchart.io/qr?text=' + enc + '&size=400&margin=2',
+      'https://chart.googleapis.com/chart?chs=400x400&cht=qr&chl=' + enc + '&choe=UTF-8'
+    ];
+  }
+  function attachQrFallback(imgEl, urls) {
+    let idx = 1;
+    imgEl.onerror = function () {
+      if (idx < urls.length) imgEl.src = urls[idx++];
+    };
+  }
+
+  // ---------- MY SHOP CARD ----------
+  function buildSubCardHTML() {
+    const pct = subPercentLeft();
+    const days = subDaysLeft();
+    const color = subStatusColor();
+    const status = subStatusLabel();
+    const expired = isSubExpired();
+    const overdue = subDaysOverdue();
+    const expiringSoon = isSubExpiringSoon();
+    const expiresStr = SUB.expires_at ? fmtDate(SUB.expires_at) : '—';
+    const lastPaidStr = SUB.last_paid_at ? fmtDate(SUB.last_paid_at) : 'First activation';
+    const circumference = 2 * Math.PI * 32;
+    const dash = (pct / 100) * circumference;
+
+    let btnText, btnId;
+    if (expired)          { btnText = 'Subscribe Now ₹' + SUB_PLAN_AMOUNT; btnId = 'sub-main-btn'; }
+    else if (expiringSoon){ btnText = 'Renew Now ₹' + SUB_PLAN_AMOUNT;    btnId = 'sub-main-btn'; }
+    else                  { btnText = 'Manage Subscription';                btnId = 'sub-manage-btn'; }
+
+    return '' +
+      '<div class="card" id="sub-card-root" style="margin-bottom:16px; max-width:480px; padding:20px; background:#fff;">' +
+        '<div style="display:flex; gap:16px; align-items:center; margin-bottom:14px;">' +
+          '<div style="position:relative; width:80px; height:80px; flex-shrink:0;">' +
+            '<svg width="80" height="80" viewBox="0 0 80 80" style="transform: rotate(-90deg);">' +
+              '<circle cx="40" cy="40" r="32" fill="none" stroke="#e9ebef" stroke-width="7"/>' +
+              '<circle cx="40" cy="40" r="32" fill="none" stroke="' + color + '" stroke-width="7" stroke-linecap="round" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + (circumference - dash) + '"/>' +
+            '</svg>' +
+            '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column;">' +
+              '<div style="font-size:16px; font-weight:800; color:' + color + '; line-height:1;">' + pct + '%</div>' +
+              '<div style="font-size:8px; color:#94a3b8; margin-top:1px;">LEFT</div>' +
+            '</div>' +
+          '</div>' +
+          '<div style="flex:1; min-width:0;">' +
+            '<div style="font-size:15px; font-weight:700; color:#0f172a; margin-bottom:6px;">' + SUB_PLAN_LABEL + '</div>' +
+            '<span style="display:inline-block; background:' + color + '22; color:' + color + '; font-size:10px; font-weight:700; padding:3px 10px; border-radius:999px; border:1px solid ' + color + '44;">● ' + status.toUpperCase() + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div style="font-size:12px; color:#475569; line-height:1.9; margin-bottom:14px; padding:10px 12px; background:#f8fafc; border-radius:10px; border:1px solid #e9ebef;">' +
+          '<div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#0f172a;">₹' + SUB_PLAN_AMOUNT + ' / year</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#0f172a;">' + expiresStr + '</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Remaining</span>' + (expired ? '<b style="color:#dc2626;">Overdue ' + overdue + 'd</b>' : '<b style="color:' + color + ';">' + days + ' days</b>') + '</div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#0f172a; font-size:11px;">' + lastPaidStr + '</b></div>' +
+          '<div style="display:flex; justify-content:space-between; padding-top:6px; margin-top:4px; border-top:1px solid #e9ebef;"><span>Pay to</span><code style="color:#15803d; font-family:monospace; font-size:11px;">' + SUB_OWNER_UPI + '</code></div>' +
+        '</div>' +
+        '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
+          '<button id="' + btnId + '" class="btn btn-primary btn-sm" style="flex:1; justify-content:center; font-weight:600;">' + btnText + '</button>' +
+          '<a id="sub-support-link" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="justify-content:center;">Support</a>' +
+        '</div>' +
+      '</div>';
+  }
+
+  const _origMyShop = window.renderMyShop;
+  if (typeof _origMyShop === 'function') {
+    window.renderMyShop = function (content) {
+      _origMyShop.apply(this, arguments);
+      try {
+        const old = content.querySelector('#sub-card-root');
+        if (old) old.remove();
+        const wrap = document.createElement('div');
+        wrap.innerHTML = buildSubCardHTML();
+        content.insertBefore(wrap.firstElementChild, content.firstChild);
+
+        const mainBtn = content.querySelector('#sub-main-btn');
+        if (mainBtn) mainBtn.onclick = function () { openSubscriptionModal(); };
+        const mgBtn = content.querySelector('#sub-manage-btn');
+        if (mgBtn) mgBtn.onclick = function () { openSubscriptionManageModal(); };
+        const sLink = content.querySelector('#sub-support-link');
+        if (sLink) sLink.href = waLink(SUB_SUPPORT_WHATSAPP,
+          'Hi, I need help with my subscription.\nShop: ' + ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || ''));
+      } catch (e) { console.warn('[SUB] card:', e); }
+    };
+  }
+
+  // ---------- MODAL A: SUBSCRIBE / RENEW ----------
+  window.openSubscriptionModal = function () {
+    const str = buildUpiString(SUB_PLAN_AMOUNT, 'Subscription renewal - ' + ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || 'Shop'));
+    const urls = getQrUrls(str);
+
+    openModal(
+      '<div style="max-width:620px; margin:0 auto;">' +
+        '<h2 style="font-size:18px; font-weight:700; margin-bottom:4px;">Subscribe to Pro</h2>' +
+        '<p style="font-size:13px; color:#64748b; margin-bottom:16px;">Pay ₹' + SUB_PLAN_AMOUNT + ' for 1 year of unlimited access.</p>' +
+        '<div style="display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap;">' +
+          '<div style="flex:0 0 230px; text-align:center;">' +
+            '<div style="background:#fff; padding:14px; border-radius:16px; border:1px solid #e9ebef; display:inline-block;">' +
+              '<img id="sub-qr-img" src="' + urls[0] + '" style="width:200px; height:200px; display:block; border-radius:6px;">' +
+            '</div>' +
+            '<div style="font-size:12px; font-weight:600; color:#15803d; margin-top:10px;">Scan to pay ₹' + SUB_PLAN_AMOUNT + '</div>' +
+          '</div>' +
+          '<div style="flex:1; min-width:240px;">' +
+            '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:6px;">Or pay to this UPI ID</div>' +
+            '<div style="background:#f8fafc; border:1px solid #e9ebef; border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:14px;">' +
+              '<code style="font-size:14px; color:#0f172a; font-weight:600; font-family:monospace; word-break:break-all;">' + esc(SUB_OWNER_UPI) + '</code>' +
+              '<button id="sub-copy-upi" class="btn btn-ghost btn-sm">📋 Copy</button>' +
+            '</div>' +
+            '<div style="font-size:12px; color:#64748b; margin-bottom:14px;">Receiver: <b style="color:#0f172a;">' + esc(SUB_OWNER_NAME) + '</b></div>' +
+            '<div style="font-size:12px; color:#475569; line-height:1.9; margin-bottom:16px; padding:12px; background:#f8fafc; border-radius:10px; border-left:3px solid #22c55e;">' +
+              '<b style="color:#0f172a;">How to activate:</b><br>' +
+              '1. Pay ₹' + SUB_PLAN_AMOUNT + ' via any UPI app<br>' +
+              '2. Send the payment screenshot on WhatsApp<br>' +
+              '3. Activated within a few hours' +
+            '</div>' +
+            '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
+              '<a id="sub-wa-btn" target="_blank" rel="noopener" class="btn" style="background:#25D366; color:#fff; font-weight:600;">💬 Send screenshot on WhatsApp</a>' +
+              '<button class="btn btn-ghost" onclick="closeModal()">Close</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>',
+      function (root) {
+        const copyBtn = root.querySelector('#sub-copy-upi');
+        if (copyBtn) copyBtn.onclick = async function () {
+          try { await navigator.clipboard.writeText(SUB_OWNER_UPI); toast('UPI ID copied', 'success'); }
+          catch (e) { prompt('Copy:', SUB_OWNER_UPI); }
+        };
+        const wa = root.querySelector('#sub-wa-btn');
+        if (wa) wa.href = waLink(SUB_SUPPORT_WHATSAPP,
+          'Hi, I have paid ₹' + SUB_PLAN_AMOUNT + ' for the yearly subscription.\n\nShop: ' +
+          ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || '') + '\nUPI: ' + SUB_OWNER_UPI + '\n\nPlease activate.');
+        attachQrFallback(root.querySelector('#sub-qr-img'), urls);
+      }
+    );
+  };
+
+  // ---------- MODAL B: MANAGE ----------
+  window.openSubscriptionManageModal = function () {
+    const expiresStr = SUB.expires_at ? fmtDate(SUB.expires_at) : '—';
+    const lastPaidStr = SUB.last_paid_at ? fmtDate(SUB.last_paid_at) : 'First activation';
+    const days = subDaysLeft();
+
+    openModal(
+      '<div style="max-width:480px; margin:0 auto;">' +
+        '<h2 style="font-size:18px; font-weight:700; margin-bottom:16px;">Your Subscription</h2>' +
+        '<div style="background:#f8fafc; border:1px solid #e9ebef; border-radius:12px; padding:14px; font-size:13px; line-height:2; color:#475569;">' +
+          '<div style="display:flex; justify-content:space-between;"><span>Status</span><b style="color:#15803d;">● Active</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Plan</span><b style="color:#0f172a;">₹' + SUB_PLAN_AMOUNT + ' / year</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Expires</span><b style="color:#0f172a;">' + expiresStr + '</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Days remaining</span><b style="color:#15803d;">' + days + ' days</b></div>' +
+          '<div style="display:flex; justify-content:space-between;"><span>Last paid</span><b style="color:#0f172a;">' + lastPaidStr + '</b></div>' +
+        '</div>' +
+        '<div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">' +
+          '<a id="sub-manage-wa" target="_blank" rel="noopener" class="btn" style="background:#25D366; color:#fff;">💬 Contact Support</a>' +
+          '<button class="btn btn-ghost" onclick="closeModal()">Close</button>' +
+        '</div>' +
+      '</div>',
+      function (root) {
+        const wa = root.querySelector('#sub-manage-wa');
+        if (wa) wa.href = waLink(SUB_SUPPORT_WHATSAPP,
+          'Hi, I want to renew my subscription early.\nShop: ' +
+          ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || ''));
+      }
+    );
+  };
+
+  // ---------- MODAL C: EXPIRED POPUP ----------
+  window.openSubscriptionExpiredModal = function () {
+    const overdue = subDaysOverdue();
+    const str = buildUpiString(SUB_PLAN_AMOUNT, 'Subscription renewal - ' + ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || 'Shop'));
+    const urls = getQrUrls(str);
+
+    openModal(
+      '<div style="max-width:640px; margin:0 auto;">' +
+        '<div style="text-align:center; margin-bottom:16px;">' +
+          '<div style="font-size:32px; margin-bottom:6px;">⚠</div>' +
+          '<h2 style="font-size:20px; font-weight:700; color:#dc2626;">Subscription Expired</h2>' +
+          '<p style="font-size:13px; color:#64748b; margin-top:4px;">Renew to keep saving data.</p>' +
+        '</div>' +
+        '<div style="display:flex; gap:22px; align-items:flex-start; flex-wrap:wrap; padding:18px; background:#f8fafc; border:1px solid #e9ebef; border-radius:16px;">' +
+          '<div style="flex:0 0 220px; text-align:center;">' +
+            '<div style="background:#fff; padding:14px; border-radius:16px; border:1px solid #e9ebef; display:inline-block;">' +
+              '<img id="sub-exp-qr-img" src="' + urls[0] + '" style="width:190px; height:190px; display:block; border-radius:6px;">' +
+            '</div>' +
+            '<div style="font-size:12px; font-weight:600; color:#15803d; margin-top:10px;">Scan to pay ₹' + SUB_PLAN_AMOUNT + '</div>' +
+          '</div>' +
+          '<div style="flex:1; min-width:240px;">' +
+            '<div style="font-size:16px; font-weight:700; color:#0f172a; margin-bottom:4px;">Renew for ₹' + SUB_PLAN_AMOUNT + '</div>' +
+            '<div style="font-size:12px; color:#64748b; margin-bottom:14px;">We will activate within a few hours after we receive your screenshot.</div>' +
+            '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:1px; font-weight:700; margin-bottom:6px;">UPI ID</div>' +
+            '<div style="background:#fff; border:1px solid #e9ebef; border-radius:12px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:12px;">' +
+              '<code style="font-size:14px; color:#0f172a; font-weight:600; font-family:monospace; word-break:break-all;">' + esc(SUB_OWNER_UPI) + '</code>' +
+              '<button id="sub-exp-copy" class="btn btn-ghost btn-sm">📋 Copy</button>' +
+            '</div>' +
+            '<div style="font-size:12px; color:#64748b; margin-bottom:14px;">Receiver: <b style="color:#0f172a;">' + esc(SUB_OWNER_NAME) + '</b></div>' +
+            '<div style="display:flex; gap:8px; flex-wrap:wrap;">' +
+              '<a id="sub-exp-wa" target="_blank" rel="noopener" class="btn" style="background:#25D366; color:#fff; font-weight:600;">💬 WhatsApp us</a>' +
+              '<button class="btn btn-ghost" onclick="closeModal()">Close</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="margin-top:16px; padding-top:14px; border-top:1px solid #e9ebef; text-align:center; font-size:12px; color:#64748b; line-height:1.9;">' +
+          '<div style="color:#dc2626; font-weight:600; margin-bottom:4px;">⚠ Overdue by ' + overdue + ' day' + (overdue === 1 ? '' : 's') + '</div>' +
+          '<div>✉ <a href="mailto:' + esc(SUB_SUPPORT_EMAIL) + '" style="color:#15803d;">' + esc(SUB_SUPPORT_EMAIL) + '</a></div>' +
+          '<div style="font-size:11px; color:#94a3b8; margin-top:6px;">Your existing data is safe. It just won\'t update until you renew.</div>' +
+        '</div>' +
+      '</div>',
+      function (root) {
+        const copyBtn = root.querySelector('#sub-exp-copy');
+        if (copyBtn) copyBtn.onclick = async function () {
+          try { await navigator.clipboard.writeText(SUB_OWNER_UPI); toast('UPI ID copied', 'success'); }
+          catch (e) { prompt('Copy:', SUB_OWNER_UPI); }
+        };
+        const wa = root.querySelector('#sub-exp-wa');
+        if (wa) wa.href = waLink(SUB_SUPPORT_WHATSAPP,
+          'Hi, I have paid ₹' + SUB_PLAN_AMOUNT + ' for renewal. Please activate.\nShop: ' +
+          ((typeof SETTINGS !== 'undefined' && SETTINGS.shop_name) || ''));
+        attachQrFallback(root.querySelector('#sub-exp-qr-img'), urls);
+      }
+    );
+  };
+
+  // ---------- SAVE GUARD ----------
+  window.blockIfExpired = function () {
+    if (isSubActive()) return true;
+    try { openSubscriptionExpiredModal(); }
+    catch (e) { alert('Your subscription has expired. Please renew for ₹' + SUB_PLAN_AMOUNT + '.'); }
+    return false;
+  };
+
+  // Wrap the real functions in this app
+  const GUARDED_FUNCTIONS = [
+    'openPartyForm',
+    'openProductForm',
+    'openCompanyForm',
+    'openPurchaseBillForm',
+    'openSupplierPaymentForm',
+    'openExpenseForm',
+    'openRestockForm',
+    'openQuickProductForm'
+  ];
+  GUARDED_FUNCTIONS.forEach(function (name) {
+    const orig = window[name];
+    if (typeof orig === 'function') {
+      window[name] = function () {
+        if (!isSubActive()) { openSubscriptionExpiredModal(); return; }
+        return orig.apply(this, arguments);
+      };
+    }
+  });
+
+  // Intercept clicks on dangerous buttons
+  document.addEventListener('click', function (e) {
+    if (isSubActive()) return;
+    const t = e.target.closest('[data-del],[data-delInv],[data-payDel],[data-delPur],[data-delRet],[data-delExp],[data-bill-del],[data-spay-del],[data-restock],[data-edit],#btn-pay,#btn-old-due,#rt-submit,#btn-export,#ni-save,#ni-save-print');
+    if (t) {
+      e.preventDefault();
+      e.stopPropagation();
+      openSubscriptionExpiredModal();
+    }
+  }, true);
+
+  // Boot: wait for session, then load subscription
+  let tries = 0;
+  const wait = setInterval(async function () {
+    tries++;
+    if (tries > 60) { clearInterval(wait); return; }
+    if (typeof SESSION === 'undefined' || !SESSION) return;
+    clearInterval(wait);
+    await loadSubscription();
+    try { updateSubscriptionUI(); } catch (e) {}
+  }, 500);
+})();
+</script>
 </body>
 </html>
